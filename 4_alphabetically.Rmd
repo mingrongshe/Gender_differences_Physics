@@ -1,0 +1,263 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+
+
+```{r echo=FALSE, message=FALSE, warning=FALSE, results='asis'}
+library(readr)
+library(jtools)
+library(simr)
+library(pwr)
+library(ggsignif)
+library(gridExtra)
+library(lme4) 
+library(emmeans)
+library(sjstats)
+library(ggplot2)
+library(dplyr)
+library(stargazer)
+setwd("/Users/shemingrong/PROJECT1_gender_differences")
+
+new = read_csv("focal_author_infos.csv")
+
+```
+
+```{r echo=FALSE}
+
+
+unique_doi_counts_total <- new %>%
+  group_by(journal) %>%
+  summarise(total_papers = n_distinct(doi))
+
+
+unique_doi_counts_true <- new %>%
+  filter(is_alpha == TRUE) %>%
+  group_by(journal) %>%
+  summarise(Alphabetically_Ordered_Papers = n_distinct(doi))
+
+unique_doi_counts_false <- new %>%
+  filter(is_alpha == FALSE) %>%
+  group_by(journal) %>%
+  summarise(unique_doi_false = n_distinct(doi))
+
+unique_doi_counts_summary <- unique_doi_counts_total %>%
+  left_join(unique_doi_counts_true, by = "journal") %>%
+  mutate(Alphabetical = (Alphabetically_Ordered_Papers / total_papers) * 100)
+
+
+column_sums <- unique_doi_counts_summary %>%
+  summarise(journal = "Total",
+            total_papers = sum(total_papers, na.rm = TRUE),
+            Alphabetically_Ordered_Papers = sum(Alphabetically_Ordered_Papers, na.rm = TRUE),
+            Alphabetical = Alphabetically_Ordered_Papers/total_papers)
+
+unique_doi_counts_summary_total <- unique_doi_counts_summary %>%
+  bind_rows(column_sums)
+
+
+knitr::kable(unique_doi_counts_summary_total, format="markdown")
+
+
+```
+
+
+```{r echo=FALSE}
+if(!require(tidyverse)) install.packages('tidyverse')
+if(!require(scales)) install.packages('scales')  
+if(!require(e1071)) install.packages('e1071')  
+library(reshape2)
+library(e1071)
+options(scipen=999)
+
+#how many papers in different number of authors
+doi_counts_total_by_numauthor <- new %>%
+  group_by(numAuthor) %>%
+  summarise(total_papers = n_distinct(doi))
+doi_counts_total_by_numauthor
+
+#how many alphabetically order papers in different number of authors
+unique_doi_counts_true <- new %>%
+  filter(is_alpha == TRUE) %>%
+  group_by(numAuthor) %>%
+  summarise(Alphabetically_Ordered_Papers = n_distinct(doi))
+unique_doi_counts_true
+
+randomly_alphabetical_summary <- doi_counts_total_by_numauthor %>%
+  group_by(numAuthor) %>%
+  summarise(
+    randomly_alphabetical = total_papers / prod(1:numAuthor)
+  )
+
+randomly_alphabetical_summary
+unique_doi_counts_summary <- doi_counts_total_by_numauthor %>%
+  right_join(unique_doi_counts_true, by = "numAuthor")
+
+total_summary <- doi_counts_total_by_numauthor %>%
+  right_join(unique_doi_counts_true, by = "numAuthor")%>%
+  left_join(randomly_alphabetical_summary, by = "numAuthor")
+
+total_summary
+# 计算差值
+diff_values <- total_summary$Alphabetically_Ordered_Papers - total_summary$randomly_alphabetical
+hist(diff_values, main="Histogram of Differences", xlab="Differences")
+plot(density(diff_values), main="Density Plot of Differences", xlab="Differences")
+
+# 进行Shapiro-Wilk检验
+shapiro_test_result <- shapiro.test(diff_values)
+shapiro_test_result
+t_test_result <- t.test(log(total_summary$Alphabetically_Ordered_Papers), log(total_summary$randomly_alphabetical), paired = TRUE)
+t_test_result
+
+# 打印检验结果
+df = as.data.frame(unique_doi_counts_summary)
+
+# 重新构造数据以适应堆叠柱状图的格式
+data_long <- reshape2::melt(df, id.vars = "numAuthor")
+
+# 创建堆叠柱状图
+ggplot(data_long, aes(fill=variable, y=value, x=numAuthor)) + 
+  geom_bar(position="identity", stat="identity") +
+  ylab("number of papers") +
+  xlab("numauthor") +
+  labs(fill = "Paper Type") +
+  scale_fill_brewer(palette = "Paired") +
+  scale_x_continuous(breaks = df$numAuthor) + 
+  scale_y_continuous(labels = scales::comma)+
+  theme_bw()+
+  theme(panel.grid=element_blank(),axis.line=element_line(size=0.5, colour="black"))
+```
+
+```{r}
+#before alphabetically
+
+new = read_csv("/Users/shemingrong/PROJECT1_gender_differences/drop_focal_authors_data_without_alpha.csv")
+
+new$status.PI = ifelse(!is.na(new$Time.to.PI),1,0)
+before_alphabetical = new[new$status.PI==1,]
+
+
+#how many authors in different alpha
+author_counts_total_by_alpha <- before_alphabetical %>%
+  group_by(alpha.group) %>%
+  summarise(total_PIs = n_distinct(author.name))
+
+author_counts_total_by_alpha_sums <- author_counts_total_by_alpha %>%
+  summarise(alpha.group = "Total PIs",
+            total_PIs = sum(total_PIs, na.rm = TRUE))
+
+counts_summary_total <- author_counts_total_by_alpha %>%
+  bind_rows(author_counts_total_by_alpha_sums)
+counts_summary_total
+
+#how many authors in different time.to.PI
+authors_counts_A<- before_alphabetical %>%
+  filter(alpha.group == 'A_M') %>%
+  group_by(Time.to.PI) %>%
+  summarise(A_M = n_distinct(author.name))
+
+#how many authors in different time.to.PI
+authors_counts_Z<- before_alphabetical %>%
+  filter(alpha.group == 'N_Z') %>%
+  group_by(Time.to.PI) %>%
+  summarise(N_Z = n_distinct(author.name))
+
+counts_summary <- authors_counts_A %>%
+  left_join(authors_counts_Z, by = "Time.to.PI")
+
+df = as.data.frame(counts_summary)
+df <- df %>% replace_na(list(N_Z = 0))
+
+df$A_M <- df$A_M / sum(df$A_M)
+df$N_Z <- df$N_Z / sum(df$N_Z)
+
+# 重新构造数据以适应堆叠柱状图的格式
+before_alpha <- reshape2::melt(df, id.vars = "Time.to.PI")
+before_alpha
+
+```
+
+```{r}
+#after alphabetically
+
+new = read_csv("/Users/shemingrong/PROJECT1_gender_differences/drop_focal_authors_data.csv")
+
+new$status.PI = ifelse(!is.na(new$Time.to.PI),1,0)
+new_alpha = new[new$status.PI==1,]
+
+
+#how many authors in different alpha
+author_counts_total_by_alpha <- new_alpha %>%
+  group_by(alpha.group) %>%
+  summarise(total_PIs = n_distinct(author.name))
+
+author_counts_total_by_alpha_sums <- author_counts_total_by_alpha %>%
+  summarise(alpha.group = "Total PIs",
+            total_PIs = sum(total_PIs, na.rm = TRUE))
+
+counts_summary_total <- author_counts_total_by_alpha %>%
+  bind_rows(author_counts_total_by_alpha_sums)
+counts_summary_total
+
+#how many authors in different time.to.PI
+authors_counts_A<- new_alpha %>%
+  filter(alpha.group == 'A_M') %>%
+  group_by(Time.to.PI) %>%
+  summarise(A_M = n_distinct(author.name))
+
+#how many authors in different time.to.PI
+authors_counts_Z<- new_alpha %>%
+  filter(alpha.group == 'N_Z') %>%
+  group_by(Time.to.PI) %>%
+  summarise(N_Z = n_distinct(author.name))
+
+counts_summary <- authors_counts_A %>%
+  left_join(authors_counts_Z, by = "Time.to.PI")
+
+df = as.data.frame(counts_summary)
+df <- df %>% replace_na(list(N_Z = 0))
+
+df$A_M <- df$A_M / sum(df$A_M)
+df$N_Z <- df$N_Z / sum(df$N_Z)
+
+# 重新构造数据以适应堆叠柱状图的格式
+after_alpha <- reshape2::melt(df, id.vars = "Time.to.PI")
+
+after_alpha
+```
+
+
+```{r}
+
+A = ggplot(before_alpha, aes(y=value, x=Time.to.PI)) + 
+  geom_bar(data=subset(before_alpha, variable=="A_M"), aes(fill=variable), position="identity", stat="identity", alpha=0.3) +
+  geom_bar(data=subset(before_alpha, variable=="N_Z"), aes(fill=variable), position="identity", stat="identity", alpha=0.3) +
+  ylab("Proportion of PIs") +
+  xlab("Time to PI") +
+  labs(fill = "surname initial") +
+  scale_fill_manual(values = c("A_M" = "blue", "N_Z" = "red")) +
+  scale_x_continuous(breaks = seq(1, max(df$Time.to.PI), by = 2))  +
+  theme_bw()+
+  theme(panel.grid=element_blank(),axis.line=element_line(size=0.5, colour="black"), legend.position=c(0.9, 0.7))+
+  ggtitle("(A) Before removing alphabetically ordered papers")
+
+B = ggplot(after_alpha, aes(y=value, x=Time.to.PI)) + 
+  geom_bar(data=subset(after_alpha, variable=="A_M"), aes(fill=variable), position="identity", stat="identity", alpha=0.3) +
+  geom_bar(data=subset(after_alpha, variable=="N_Z"), aes(fill=variable), position="identity", stat="identity", alpha=0.3) +
+  ylab("Proportion of PIs") +
+  xlab("Time to PI") +
+  labs(fill = "surname initial") +
+  scale_fill_manual(values = c("A_M" = "blue", "N_Z" = "red")) +
+  scale_x_continuous(breaks = seq(1, max(df$Time.to.PI), by = 2))  +
+  theme_bw()+
+  theme(panel.grid=element_blank(),axis.line=element_line(size=0.5, colour="black"),legend.position= "none")+
+  ggtitle("(B) After removing alphabetically ordered papers")
+
+grid.arrange(arrangeGrob(A,B,nrow =2))
+
+# Create a grob
+combined_plot <- arrangeGrob(A, B, nrow = 2)
+
+# Save the grob as a PDF
+ggsave("/Users/shemingrong/PROJECT1_gender_differences//graphs/alpha.pdf", combined_plot, width = 10, height = 5)
+```

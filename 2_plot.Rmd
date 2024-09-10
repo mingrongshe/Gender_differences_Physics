@@ -1,0 +1,869 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+
+
+```{r echo=FALSE, message=FALSE, warning=FALSE, results='asis'}
+library(readr)
+library(jtools)
+library(simr)
+library(pwr)
+library(ggsignif)
+library(gridExtra)
+library(lme4) 
+library(emmeans)
+library(sjstats)
+library(ggplot2)
+library(tidyverse)
+library(grid)
+library(gtable)
+library(stargazer)
+setwd("/Users/shemingrong/PROJECT1_gender_differences")
+new = read_csv('/Users/shemingrong/PROJECT1_gender_differences/drop_focal_authors_data.csv')
+new$status = ifelse(year(as.Date(new$last.year))<2015, 1, 0) 
+
+new$Gender <- relevel(as.factor(new$Gender), ref = 'male')
+model_papers = glm(no.of.papers~Gender, family=poisson(), data = new) 
+
+#network size
+model_networksize = glm(log(indegree)~no.of.papers, family="gaussian", data = new) 
+new$adj.degree = resid(model_networksize)
+new$residuals.degree  = scale(new$adj.degree)
+new$residuals.degree = as.numeric(new$residuals.degree)
+
+
+#links
+model_links = glm(log(average.links)~no.of.papers, family="gaussian", data = new) 
+new$adj.links <- resid(model_links)
+
+new$residuals.links <- scale(new$adj.links)
+new$residuals.links <- as.numeric(new$residuals.links)
+
+
+#cc
+model_cluster <- glm(clusteringcoefficient.global~no.of.papers,data=new,family="binomial", na.action = na.exclude)
+new$adj.cluster <- resid(model_cluster)
+new$residuals.cluster = scale(new$adj.cluster)
+new$residuals.cluster = as.numeric(new$residuals.cluster)
+
+#average.coauthors
+model_coauthors <- glm(average.coauthors~no.of.papers, family="gaussian", data = new)
+new$adj.average.coauthors <- resid(model_coauthors)
+new$residuals.average.coauthors = scale(new$adj.average.coauthors)
+new$residuals.average.coauthors = as.numeric(new$residuals.average.coauthors)
+
+dep_labels = c("network size", "tie strength", "clustering coef.","average coauthors")
+stargazer(model_networksize,model_links, model_cluster,model_coauthors,title="Table: Regression of each collaboration behaviour metric against number of publications",type='html',dep.var.labels =dep_labels,no.space=TRUE,keep.stat="n",omit.stat = ("LL"),align = TRUE,ci.level = 0.95)
+new$status.PI = ifelse(!is.na(new$Time.to.PI),1,0)
+new$time.PI = ifelse(!is.na(new$Time.to.PI),new$Time.to.PI,new$n.years)
+new$time.PI[new$time.PI<1]= 0.5
+write.csv(new, "adjusted_publication_new.csv",row.names = F) 
+```
+
+```{r echo=FALSE, warning=FALSE, results='asis'}
+adj_model_0 = glm(no.of.papers~Gender, family=poisson(), data = new) 
+
+adj_model_1 = lm(new$residuals.degree~new$Gender)
+adj_model_2 = lm(new$residuals.links~new$Gender)
+adj_model_3 = lm(new$residuals.cluster~new$Gender)
+adj_model_4 = lm(new$residuals.average.coauthors~new$Gender)
+adj_dep_labels <- c('publication count', 'adj. network size', 'adj. tie strength', 'adj. clustering coefficient', 'adj. average co-authors')
+stargazer(adj_model_1,adj_model_2,adj_model_3,adj_model_4,title="Table: Gender differences in adjusted collaboration behaviour",type='html',dep.var.labels = adj_dep_labels, no.space=TRUE,keep.stat="n",omit.stat = ("LL"),align = TRUE,ci.level = 0.95)
+
+```
+
+```{r echo=FALSE, message=FALSE, warning=FALSE, paged.print=FALSE}
+library(GGally)
+x_limits <- c(-3.5, 3.5)
+diag_histogram_fn <- function(data, mapping, ...){
+  ggplot(data = data, mapping = mapping) +
+    geom_histogram(fill = 'white', color = 'black', ...) + 
+    xlim(x_limits) +  # Set the x-axis limits
+    theme_bw() +
+    theme(panel.grid=element_blank(), axis.line=element_line(size=0.5, colour="black"))
+}
+
+point_plot_2d <- function(data, mapping, ...){
+  ggplot(data = data, mapping = mapping) +
+    geom_point(alpha=0.1, color="#132B43", size=0.5, ...) +  # Adjust size, color, and alpha
+    xlim(x_limits) +  # Set the x-axis limits
+    theme_bw() +
+    theme(panel.grid=element_blank(), axis.line=element_line(size=0.5, colour="black"))
+}
+
+heatmap_2d <- function(data, mapping, ...){
+  ggplot(data = data, mapping = mapping) +
+    stat_density_2d(aes(fill = ..level..), geom = "polygon", contour = TRUE) +
+    scale_fill_gradient(..., low = "#C9C9C9", high = "#363636",  # Modify to scale_fill_gradient
+                        space = "Lab", na.value = "grey50", guide = "colourbar") +
+    xlim(x_limits) +  # Set the x-axis limits
+    theme_bw() +
+    theme(panel.grid=element_blank(), axis.line=element_line(size=0.5, colour="black"))
+}
+
+cor_fn <- function(data, mapping, ...) {
+  ggally_cor(data = data, mapping = mapping, ...) + theme_bw() +
+    theme(panel.grid = element_blank(), axis.line = element_line(size = 1, colour = "black"),
+          axis.text = element_text(size = 30),  # Adjust size for the correlation text
+          strip.text = element_text(size = 30))
+}
+
+columnLabels <- c("adj. network size", "adj. tie strength", "adj. clustering coeff.", "adj. coauthors per publication")
+
+p <- ggpairs(new, columns = c("residuals.degree", "residuals.links", "residuals.cluster", "residuals.average.coauthors"),
+             columnLabels = columnLabels,
+             upper = list(continuous = wrap(cor_fn, size = 10)),
+             lower = list(continuous = heatmap_2d),
+             diag = list(continuous = diag_histogram_fn))
+
+# Modify columnLabels font size
+p <- p + theme(axis.text.x=element_text(size=20),
+               axis.text.y=element_text(size=20),
+               strip.text.x = element_text(size = 20),
+               strip.text.y = element_text(size = 20))
+ggsave("/Users/shemingrong/PROJECT1_gender_differences/graphs/corre_plot.pdf", plot = p, width = 17, height = 17)
+p
+```
+
+```{r echo=FALSE, warning=FALSE, results='asis'}
+new$Gender <- relevel(as.factor(new$Gender), ref = 'male')
+
+m1<-glm(as.factor(status.PI)~Gender*residuals.degree,family="binomial",data=new)
+m1summ<-summ(m1, 
+              scale = FALSE, 
+              vifs = getOption("summ-vifs", FALSE),
+              confint = getOption("summ-confint", TRUE),
+              digits = getOption("jtools-digits", default = 3), 
+              exp = FALSE) 
+m2<-glm(as.factor(status.PI)~Gender*residuals.links,family="binomial",data=new)
+m2summ<-summ(m2, 
+              scale = FALSE, 
+              vifs = getOption("summ-vifs", FALSE),
+              confint = getOption("summ-confint", TRUE),
+              digits = getOption("jtools-digits", default = 3), 
+              exp = FALSE) 
+m3<-glm(as.factor(status.PI)~Gender*residuals.cluster,family="binomial",data=new)
+m3summ<-summ(m3, 
+              scale = FALSE, 
+              vifs = getOption("summ-vifs", FALSE),
+              confint = getOption("summ-confint", TRUE),
+              digits = getOption("jtools-digits", default = 3), 
+              exp = FALSE) 
+m4<-glm(as.factor(status.PI)~Gender*residuals.average.coauthors,family="binomial",data=new)
+m4summ<-summ(m4, 
+              scale = FALSE, 
+              vifs = getOption("summ-vifs", FALSE),
+              confint = getOption("summ-confint", TRUE),
+              digits = getOption("jtools-digits", default = 3), 
+              exp = FALSE) 
+covariate_labels <- c("constant","female","adjusted.network.size", "adjusted.network.size : female", "adjusted.tie.strength", "adjusted.tie.strength : female", "adjusted.cluster.coef.", "adjusted.cluster.coef. : female","adjusted.average.co-authors", "adjusted.average.co-authors : female")
+stargazer(m1,m2,m3,m4,title="Table: Likelihood of being a PI",dep.var.labels =c("Likelihood of being a PI"), order = c(10,1,2,3,4,5,6,7,8,9),covariate.labels = covariate_labels,type='html',no.space=TRUE,keep.stat="n",omit.stat = ("LL"),align = TRUE,ci.level = 0.95)
+```
+
+```{r echo=FALSE, warning=FALSE}
+#Female focal authors dataset
+new.F = new[new$Gender=="female",] 
+new.F = new.F[(!is.na(new.F$Gender)),] 
+new.F$Gender = factor(new.F$Gender)#5829
+#Male focal authors dataset
+new.M = new[new$Gender=="male",] 
+new.M = new.M[(!is.na(new.M$Gender)),]
+new.M$Gender = factor(new.M$Gender) #49275
+
+m1f<-glm(as.factor(status.PI)~residuals.degree,family="binomial",data=new.F)
+m1fsumm<-summ(m1f, 
+              scale = FALSE, 
+              vifs = getOption("summ-vifs", FALSE),
+              confint = getOption("summ-confint", TRUE),
+              digits = getOption("jtools-digits", default = 3), 
+              exp = FALSE) 
+
+m1m<-glm(as.factor(status.PI)~residuals.degree,family="binomial",data=new.M)
+m1msumm<-summ(m1m,
+              scale = FALSE, 
+              vifs = getOption("summ-vifs", FALSE),
+              confint = getOption("summ-confint", TRUE),
+              digits = getOption("jtools-digits", default = 3),
+              exp = FALSE) 
+m2f<-glm(as.factor(status.PI)~residuals.links,family="binomial",data=new.F)
+m2fsumm<-summ(m2f,
+              scale = FALSE, 
+              vifs = getOption("summ-vifs", FALSE),
+              confint = getOption("summ-confint", TRUE),
+              digits = getOption("jtools-digits", default = 3),
+              exp = FALSE) 
+m2m<-glm(as.factor(status.PI)~residuals.links,family="binomial",data=new.M)
+m2msumm<-summ(m2m,
+              scale = FALSE, 
+              vifs = getOption("summ-vifs", FALSE),
+              confint = getOption("summ-confint", TRUE),
+              digits = getOption("jtools-digits", default = 3),
+              exp = FALSE) 
+m3f<-glm(as.factor(status.PI)~residuals.cluster,family="binomial",data=new.F)
+m3fsumm<-summ(m3f,
+              scale = FALSE, 
+              vifs = getOption("summ-vifs", FALSE),
+              confint = getOption("summ-confint", TRUE),
+              digits = getOption("jtools-digits", default = 3),
+              exp = FALSE) 
+m3m<-glm(as.factor(status.PI)~residuals.cluster,family="binomial",data=new.M)
+m3msumm<-summ(m3m,
+              scale = FALSE, 
+              vifs = getOption("summ-vifs", FALSE),
+              confint = getOption("summ-confint", TRUE),
+              digits = getOption("jtools-digits", default = 3),
+              exp = FALSE) 
+m4f<-glm(as.factor(status.PI)~residuals.average.coauthors,family="binomial",data=new.F)
+m4fsumm<-summ(m4f,
+              scale = FALSE, 
+              vifs = getOption("summ-vifs", FALSE),
+              confint = getOption("summ-confint", TRUE),
+              digits = getOption("jtools-digits", default = 3),
+              exp = FALSE) 
+m4m<-glm(as.factor(status.PI)~residuals.average.coauthors,family="binomial",data=new.M)
+m4msumm<-summ(m4m,
+              scale = FALSE, 
+              vifs = getOption("summ-vifs", FALSE),
+              confint = getOption("summ-confint", TRUE),
+              digits = getOption("jtools-digits", default = 3),
+              exp = FALSE) 
+```
+
+```{r echo=FALSE, fig.height=5, fig.width=10, warning=FALSE}
+labeltext<-c(1:8)
+Gender<-c("F","M","F","M","F","M","F","M")
+estimate<-c(m1fsumm$coef[2],
+            m1msumm$coef[2],
+            m2fsumm$coef[2],
+            m2msumm$coef[2],
+            m3fsumm$coef[2],
+            m3msumm$coef[2],
+            m4fsumm$coef[2],
+            m4msumm$coef[2])
+lower<-c(m1fsumm$coef[4],
+         m1msumm$coef[4],
+         m2fsumm$coef[4],
+         m2msumm$coef[4],
+         m3fsumm$coef[4],
+         m3msumm$coef[4],
+         m4fsumm$coef[4],
+         m4msumm$coef[4])
+upper<-c(m1fsumm$coef[6],
+         m1msumm$coef[6],
+         m2fsumm$coef[6],
+         m2msumm$coef[6],
+         m3fsumm$coef[6],
+         m3msumm$coef[6],
+         m4fsumm$coef[6],
+         m4msumm$coef[6])
+df<- data.frame(labeltext, estimate, lower, upper, Gender)
+df$labeltext<-factor(df$labeltext, levels=rev(df$labeltext))
+df$colour <- c("dark grey","dark grey","dark grey","dark grey","dark grey","dark grey","dark grey","dark grey")
+
+library(forestplot)
+collaboration_label <- c('Collaboration statistics',
+                        'Network size', 'Interaction', 'Female', 'Male',
+                        'Tie strength', 'Interaction', 'Female', 'Male',
+                        'Clustering coefficient', 'Interaction', 'Female', 'Male',
+                        'Coauthors per publication', 'Interaction', 'Female', 'Male')
+sample_number <- c('Number', 
+                   NA, length(unique(new$author.name)), table(new$Gender)["female"], table(new$Gender)["male"],
+                    NA, length(unique(new$author.name)), table(new$Gender)["female"], table(new$Gender)["male"],
+                    NA, length(unique(new$author.name)), table(new$Gender)["female"], table(new$Gender)["male"],
+                    NA, length(unique(new$author.name)), table(new$Gender)["female"], table(new$Gender)["male"])
+
+R_square = c('R^2',
+             NA, round(attr(m1summ, "rsqmc"),3), round(attr(m1fsumm, "rsqmc"), 3), round(attr(m1msumm, "rsqmc"), 3),
+             NA, round(attr(m2summ, "rsqmc"),3), round(attr(m2fsumm, "rsqmc"), 3), round(attr(m2msumm, "rsqmc"), 3),
+             NA, round(attr(m3summ, "rsqmc"),3), round(attr(m3fsumm, "rsqmc"), 3), round(attr(m3msumm, "rsqmc"), 3),
+             NA, round(attr(m4summ, "rsqmc"),3), round(attr(m4fsumm, "rsqmc"), 3), round(attr(m4msumm, "rsqmc"), 3))
+
+estimate =c(NA, 
+            NA, m1summ$coef[4], m1fsumm$coef[2], m1msumm$coef[2],
+            NA, m2summ$coef[4], m2fsumm$coef[2], m2msumm$coef[2],
+            NA, m3summ$coef[4], m3fsumm$coef[2], m3msumm$coef[2],
+            NA, m4summ$coef[4], m4fsumm$coef[2], m4msumm$coef[2])
+
+lower = c(NA, 
+          NA, m1summ$coef[8], m1fsumm$coef[4], m1msumm$coef[4],
+          NA, m2summ$coef[8], m2fsumm$coef[4], m2msumm$coef[4],
+          NA, m3summ$coef[8], m3fsumm$coef[4], m3msumm$coef[4],
+          NA, m4summ$coef[8], m4fsumm$coef[4], m4msumm$coef[4])
+
+upper =  c(NA, 
+           NA, m1summ$coef[12], m1fsumm$coef[6], m1msumm$coef[6],
+           NA, m2summ$coef[12], m2fsumm$coef[6], m2msumm$coef[6],
+           NA, m3summ$coef[12], m3fsumm$coef[6], m3msumm$coef[6],
+           NA, m4summ$coef[12], m4fsumm$coef[6], m4msumm$coef[6])
+
+p_value = c('P value',
+            NA, m1summ$coef[20], m1fsumm$coef[10], m1msumm$coef[10],
+            NA, m2summ$coef[20], m2fsumm$coef[10], m2msumm$coef[10],
+            NA, m3summ$coef[20], m3fsumm$coef[10], m3msumm$coef[10],
+            NA, m4summ$coef[20], m4fsumm$coef[10], m4msumm$coef[10])
+
+
+df<- data.frame(collaboration_label, sample_number, estimate, lower, upper, p_value)
+
+styles <- fpShapesGp(
+  lines = list(
+    gpar(col = "black"),
+    
+    gpar(col = "black"),
+    gpar(col = "black"),
+    gpar(col = "#FF8C27"),
+    gpar(col = "#1673B1"),
+    
+    gpar(col = "black"),
+    gpar(col = "black"),
+    gpar(col = "#FF8C27"),
+    gpar(col = "#1673B1"),
+    
+    gpar(col = "black"),
+    gpar(col = "black"),
+    gpar(col = "#FF8C27"),
+    gpar(col = "#1673B1"),
+    
+    gpar(col = "black"),
+    gpar(col = "black"),
+    gpar(col = "#FF8C27"),
+    gpar(col = "#1673B1")
+  ),
+  box = list(
+    gpar(fill = "black", col = 'black'),
+    
+    gpar(fill = "black", col = 'black'),
+    gpar(fill = "black", col = 'black'),
+    gpar(fill = "#FF8C27", col = '#FF8C27'),
+    gpar(fill = "#1673B1", col = '#1673B1'),
+    
+    gpar(fill = "black", col = 'black'),
+    gpar(fill = "black", col = 'black'),
+    gpar(fill = "#FF8C27", col = '#FF8C27'),
+    gpar(fill = "#1673B1", col = '#1673B1'),
+    
+    gpar(fill = "black", col = 'black'),
+    gpar(fill = "black", col = 'black'),
+    gpar(fill = "#FF8C27", col = '#FF8C27'),
+    gpar(fill = "#1673B1", col = '#1673B1'),
+    
+    gpar(fill = "black", col = 'black'),
+    gpar(fill = "black", col = 'black'),
+    gpar(fill = "#FF8C27", col = '#FF8C27'),
+    gpar(fill = "#1673B1", col = '#1673B1')
+  ) 
+)
+
+
+p = forestplot(labeltext = as.matrix(df[, 1:2]),
+           mean = estimate,
+           lower = lower,
+           upper = upper,
+           is.summary = c(T, T, F, F, F, T, F, F, F, T, F, F, F, T, F, F, F),
+           xticks = c(-0.5, -0.4, -0.3, -0.2, -0.1, 0, 0.1, 0.2, 0.3, 0.4, 0.5),
+           lwd.xaxis = 2,
+           zero = 0,
+           lwd.zero =2,
+           lineheight = "auto",
+           colgap = unit(8, "mm"),
+           lwd.ci = 2,
+           boxsize = 0.2,
+           shapes_gp = styles,
+           title = 'Likelihood of being a PI',
+           txt_gp = fpTxtGp(ticks = gpar(fontsize = 20)))
+
+# 在R的绘图窗口中绘制图像
+print(p)
+
+# 打开PDF设备
+pdf("/Users/shemingrong/PROJECT1_gender_differences/graphs/Likelihood.pdf", width = 7, height = 4)
+
+# 再次绘制图像以保存到PDF
+print(p)
+
+# 关闭PDF设备
+dev.off()
+
+```
+### Career length
+
+<br/> <br/>
+
+```{r echo=FALSE, warning=FALSE, results='asis'}
+library(flexsurv)
+m9<-survreg(Surv(new$n.years,new$status)~Gender*residuals.degree, dist="lognormal", data=new)
+m10<-survreg(Surv(new$n.years,new$status)~Gender*residuals.links, dist="lognormal", data=new)
+m11<-survreg(Surv(new$n.years,new$status)~Gender*residuals.cluster, dist="lognormal", data=new)
+m12<-survreg(Surv(new$n.years,new$status)~Gender*residuals.average.coauthors, dist="lognormal", data=new)
+stargazer(m9,m10,m11, m12, type='html',title="Table: career length",dep.var.labels =c("Career length"),order = c(10,1,2,3,4,5,6,7,8,9),covariate.labels = covariate_labels,apply.coef = exp, p.auto=F,t.auto=F,no.space=TRUE, keep.stat="n",ci=TRUE)
+
+m9F<-survreg(Surv(new.F$n.years,new.F$status)~residuals.degree, dist="lognormal", data=new.F)
+m9M<-survreg(Surv(new.M$n.years,new.M$status)~residuals.degree, dist="lognormal", data=new.M)
+
+m10F<-survreg(Surv(new.F$n.years,new.F$status)~residuals.links, dist="lognormal", data=new.F)
+m10M<-survreg(Surv(new.M$n.years,new.M$status)~residuals.links, dist="lognormal", data=new.M)
+
+m11F<-survreg(Surv(n.years,status)~residuals.cluster, dist="lognormal", data=new.F)
+m11M<-survreg(Surv(n.years,status)~residuals.cluster, dist="lognormal", data=new.M)
+
+m12F<-survreg(Surv(n.years,status)~residuals.average.coauthors, dist="lognormal", data=new.F)
+m12M<-survreg(Surv(n.years,status)~residuals.average.coauthors, dist="lognormal", data=new.M)
+
+CI_sample_number <- c('Number', 
+                   NA, length(unique(new$author.name)), table(new$Gender)["female"], table(new$Gender)["male"],
+                    NA, length(unique(new$author.name)), table(new$Gender)["female"], table(new$Gender)["male"],
+                    NA, length(unique(new$author.name)), table(new$Gender)["female"], table(new$Gender)["male"],
+                    NA, length(unique(new$author.name)), table(new$Gender)["female"], table(new$Gender)["male"])
+
+R_square_CI <- c('R^2',
+                  NA, round(1 - as.numeric(m9$loglik[2] / m9$loglik[1]), 3), round(1 - as.numeric(m9F$loglik[2] / m9F$loglik[1]), 3), round(1 - as.numeric(m9M$loglik[2] / m9M$loglik[1]), 3),
+                   NA, round(1 - as.numeric(m10$loglik[2] / m10$loglik[1]), 3), round(1 - as.numeric(m10F$loglik[2] / m10F$loglik[1]), 3), round(1 - as.numeric(m10M$loglik[2] / m10M$loglik[1]), 3),
+                   NA, round(1 - as.numeric(m11$loglik[2] / m11$loglik[1]), 3), round(1 - as.numeric(m11F$loglik[2] / m11F$loglik[1]), 3), round(1 - as.numeric(m11M$loglik[2] / m11M$loglik[1]), 3),
+                   NA, round(1 - as.numeric(m12$loglik[2] / m12$loglik[1]), 3), round(1 - as.numeric(m12F$loglik[2] / m12F$loglik[1]), 3), round(1 - as.numeric(m12M$loglik[2] / m12M$loglik[1]), 3))
+
+estimate_CI<-c(NA,
+                NA, exp(coef(m9))[4], exp(coef(m9F))[2], exp(coef(m9M))[2], 
+                NA, exp(coef(m10))[4], exp(coef(m10F))[2], exp(coef(m10M))[2], 
+                NA, exp(coef(m11))[4], exp(coef(m11F))[2], exp(coef(m11M))[2], 
+                NA, exp(coef(m12))[4], exp(coef(m12F))[2], exp(coef(m12M))[2])
+
+lower_CI<-c(NA,
+             NA, exp(confint(m9))[4], exp(confint(m9F))[2], exp(confint(m9M))[2],
+             NA, exp(confint(m10))[4], exp(confint(m10F))[2], exp(confint(m10M))[2],
+             NA, exp(confint(m11))[4], exp(confint(m10F))[2], exp(confint(m10M))[2],
+             NA, exp(confint(m12))[4], exp(confint(m12F))[2], exp(confint(m12M))[2])
+
+upper_CI<-c(NA,
+             NA, exp(confint(m9))[8], exp(confint(m9F))[4], exp(confint(m9M))[4],
+             NA, exp(confint(m10))[8], exp(confint(m10F))[4], exp(confint(m10M))[4],
+             NA, exp(confint(m11))[8], exp(confint(m11F))[4], exp(confint(m11M))[4],
+             NA, exp(confint(m12))[8], exp(confint(m12F))[4], exp(confint(m12M))[4])
+
+
+forest_CI<- data.frame(collaboration_label, CI_sample_number,R_square_CI, estimate_CI, lower_CI, upper_CI)
+
+
+
+cl = forestplot(labeltext = as.matrix(forest_CI[, 1:2]),
+         mean = estimate_CI,
+         lower = lower_CI,
+         upper = upper_CI,
+         is.summary = c(T, T, F, F, F, T, F, F, F, T, F, F, F, T, F, F, F),
+         xticks = c(0.7, 0.8, 0.9, 1, 1.1, 1.2, 1.3, 1.4, 1.5),
+         lwd.xaxis = 2,
+         zero = 1,
+         lwd.zero =2,
+         lineheight = "auto",
+         colgap = unit(8, "mm"),
+         lwd.ci = 2,
+         boxsize = 0.2,
+         shapes_gp = styles,
+         title = 'Career length',
+         txt_gp = fpTxtGp(ticks = gpar(fontsize = 20)))
+
+
+# 在R的绘图窗口中绘制图像
+print(cl)
+
+# 打开PDF设备
+pdf("/Users/shemingrong/PROJECT1_gender_differences/graphs/cl.pdf", width = 7, height = 4)
+
+# 再次绘制图像以保存到PDF
+print(cl)
+
+# 关闭PDF设备
+dev.off()
+
+```
+
+
+
+### Time to become a principal investigator
+
+
+```{r echo=FALSE, warning=FALSE}
+new.PI =  new
+new.PI$Gender = factor(new.PI$Gender, levels = c("female", "male"))
+# PI status: 1 if PI, 0 if author did not make it to PI
+new.PI$status.PI = ifelse(!is.na(new.PI$Time.to.PI),1,0)
+#exclude authors that did not become PI and also left science
+
+new.PI = new.PI[new.PI$status.PI == 1 | (new.PI$status.PI == 0 & as.numeric(format(as.Date(new.PI$last.year, format="%Y-%m-%d"), "%Y")) > 2014), ]
+
+ #935-772=163 authors out
+#Create new.PI variable: time to PI, or career length if didn't become a PI
+new.PI$time.PI = ifelse(!is.na(new.PI$Time.to.PI),new.PI$Time.to.PI,new.PI$n.years)
+new.PI$time.PI[new.PI$time.PI<1]= 0.5 #This accounts for 1 individual who reached PI status the same year as they started publishing
+```
+
+We tested whether these metrics correlated with (i) time to become a PI and (ii) career length and (iii) career length after becoming a PI by using AFT models. We included gender and its interaction with the metric of interest in all AFT models. If the interaction was significant, we re-ran AFT models for each gender separately. When not significant, we re-ran AFT models without the interaction term to derive estimates for the main effects.
+
+```{r echo=FALSE, warning=FALSE, results='asis'}
+library(survival)
+new.PI$Gender <- relevel(as.factor(new.PI$Gender), ref = 'male')
+m5<-survreg(Surv(new.PI$time.PI,new.PI$status.PI)~Gender*residuals.degree, dist="lognormal",data=new.PI)
+m6<-survreg(Surv(new.PI$time.PI,new.PI$status.PI)~Gender*residuals.links, dist="lognormal", data=new.PI)
+m7<-survreg(Surv(new.PI$time.PI,new.PI$status.PI)~Gender*residuals.cluster, dist="lognormal", data=new.PI)
+m8<-survreg(Surv(new.PI$time.PI,new.PI$status.PI)~Gender*residuals.average.coauthors, dist="lognormal", data=new.PI)
+
+stargazer(m5,m6,m7, m8, title="Table: Time to become a PI", type='html',dep.var.labels =c("Time to becoming a PI"),order = c(10,1,2,3,4,5,6,7,8,9),covariate.labels = covariate_labels, apply.coef = exp, p.auto=F,t.auto=F,no.space=TRUE, keep.stat="n",ci=TRUE, ci.level = 0.95)
+```
+
+```{r echo=FALSE, warning=FALSE}
+library(flexsurv)
+new.PI.F = new.PI[new.PI$Gender=="female",] 
+new.PI.F = new.PI.F[(!is.na(new.PI.F$Gender)),] 
+new.PI.F$Gender = factor(new.PI.F$Gender)#3838
+new.PI.M = new.PI[new.PI$Gender=="male",] 
+new.PI.M = new.PI.M[(!is.na(new.PI.M$Gender)),]
+new.PI.M$Gender = factor(new.PI.M$Gender) #34504
+
+m5F<-survreg(Surv(time.PI,status.PI)~residuals.degree, dist="lognormal", data=new.PI.F)
+m5M<-survreg(Surv(time.PI,status.PI)~residuals.degree, dist="lognormal", data=new.PI.M)
+
+m6F<-survreg(Surv(new.PI.F$time.PI,new.PI.F$status.PI)~residuals.links, dist="lognormal", data=new.PI.F)
+m6M<-survreg(Surv(new.PI.M$time.PI,new.PI.M$status.PI)~residuals.links, dist="lognormal", data=new.PI.M)
+
+m7F<-survreg(Surv(time.PI,status.PI)~residuals.cluster, dist="lognormal", data=new.PI.F)
+m7M<-survreg(Surv(time.PI,status.PI)~residuals.cluster, dist="lognormal", data=new.PI.M)
+
+m8F<-survreg(Surv(time.PI,status.PI)~residuals.average.coauthors, dist="lognormal", data=new.PI.F)
+m8M<-survreg(Surv(time.PI,status.PI)~residuals.average.coauthors, dist="lognormal", data=new.PI.M)
+
+TPI_sample_number <- c('Number', 
+                   NA, length(unique(new.PI$author.name)), table(new.PI$Gender)["female"], table(new.PI$Gender)["male"],
+                    NA, length(unique(new.PI$author.name)), table(new.PI$Gender)["female"], table(new.PI$Gender)["male"],
+                    NA, length(unique(new.PI$author.name)), table(new.PI$Gender)["female"], table(new.PI$Gender)["male"],
+                    NA, length(unique(new.PI$author.name)), table(new.PI$Gender)["female"], table(new.PI$Gender)["male"])
+
+
+R_square_TPI <- c('R^2',
+                  NA, round(1 - as.numeric(m5$loglik[2] / m5$loglik[1]), 3), round(1 - as.numeric(m5F$loglik[2] / m5F$loglik[1]), 3), round(1 - as.numeric(m5M$loglik[2] / m5M$loglik[1]), 3),
+                   NA, round(1 - as.numeric(m6$loglik[2] / m6$loglik[1]), 3), round(1 - as.numeric(m6F$loglik[2] / m6F$loglik[1]), 3), round(1 - as.numeric(m6M$loglik[2] / m6M$loglik[1]), 3),
+                   NA, round(1 - as.numeric(m7$loglik[2] / m7$loglik[1]), 3), round(1 - as.numeric(m7F$loglik[2] / m7F$loglik[1]), 3), round(1 - as.numeric(m7M$loglik[2] / m7M$loglik[1]), 3),
+                   NA, round(1 - as.numeric(m8$loglik[2] / m8$loglik[1]), 3), round(1 - as.numeric(m8F$loglik[2] / m8F$loglik[1]), 3), round(1 - as.numeric(m8M$loglik[2] / m8M$loglik[1]), 3))
+
+
+estimate_TPI<-c(NA,
+                NA, exp(coef(m5))[4], exp(coef(m5F))[2], exp(coef(m5M))[2], 
+                NA, exp(coef(m6))[4], exp(coef(m6F))[2], exp(coef(m6M))[2],
+                NA, exp(coef(m7))[4], exp(coef(m7F))[2], exp(coef(m7M))[2],
+                NA, exp(coef(m8))[4], exp(coef(m8F))[2], exp(coef(m8M))[2])
+
+
+lower_TPI<-c(NA,
+             NA, exp(confint(m5))[4], exp(confint(m5F))[2], exp(confint(m5M))[2],
+             NA, exp(confint(m6))[4], exp(confint(m6F))[2], exp(confint(m6M))[2],
+             NA, exp(confint(m7))[4], exp(confint(m7F))[2], exp(confint(m7M))[2],
+             NA, exp(confint(m8))[4], exp(confint(m8F))[2], exp(confint(m8M))[2])
+
+upper_TPI<-c(NA,
+             NA, exp(confint(m5))[8], exp(confint(m5F))[4], exp(confint(m5M))[4],
+             NA, exp(confint(m6))[8], exp(confint(m5F))[4], exp(confint(m5M))[4],
+             NA, exp(confint(m7))[8], exp(confint(m7F))[4], exp(confint(m7M))[4],
+             NA, exp(confint(m8))[8], exp(confint(m8F))[4], exp(confint(m8M))[4])
+
+
+forest_TPI<- data.frame(collaboration_label, TPI_sample_number, R_square_TPI, estimate_TPI, lower_TPI, upper_TPI)
+
+```
+
+### Career length after being a PI analysis
+
+In the career length after becoming a PI analysis, we use the subset of focal authors that did become a PI (n = `r length(unique(new.PIsonly$author.name))`), the event was cessation of publishing, and `r table(new.PIsonly$status)["0"]` of `r length(unique(new.PIsonly$author.name))` focal authors were censored given that they were still actively publishing within 2 years of the study period.
+
+```{r echo=FALSE, warning=FALSE}
+#look at subset: authors that became PI's, time = time from when they became PI to end of publication. Event = stopped publishing
+new.PIsonly = new[new$status.PI==1,]
+#find year they became PI
+new.PIsonly$yearPI = new.PIsonly$third.lastauthor
+#find time from when they became PI until they stopped publishing
+new.PIsonly$n.years.PI = as.double(as.Date(new.PIsonly$last.year) - as.Date(new.PIsonly$yearPI))/365
+new.PIsonly$status = ifelse(year(as.Date(new.PIsonly$last.year)) < 2015, 1, 0) #This gives data for censoring
+new.PIsonly$n.years.PI[new.PIsonly$n.years.PI<1]= 0.5 
+
+write.csv(new.PIsonly, "adjusted_publication_newPIsonly.csv",row.names = F) 
+```
+
+```{r echo=FALSE, warning=FALSE, results='asis'}
+m13<-survreg(Surv(n.years.PI, status)~Gender*residuals.degree, dist="lognormal", data=new.PIsonly)
+m14<-survreg(Surv(n.years.PI, status)~Gender*residuals.links, dist="lognormal", data=new.PIsonly)
+m15<-survreg(Surv(n.years.PI, status)~Gender*residuals.cluster, dist="lognormal", data=new.PIsonly)
+m16<-survreg(Surv(n.years.PI, status)~Gender*residuals.average.coauthors, dist="lognormal", data=new.PIsonly)
+dep_variables<-c('time to become a PI', 'career length', 'career length after a PI')
+stargazer(m13,m14,m15, m16, type='html',title="Table: career length after pi",dep.var.labels =c("Career length after becoming a PI"),order = c(10,1,2,3,4,5,6,7,8,9),covariate.labels = covariate_labels,apply.coef = exp, p.auto=F,t.auto=F,no.space=TRUE, keep.stat="n",ci=TRUE)
+
+new.PIsonly.F = new.PIsonly[new.PIsonly$Gender=="female",] 
+new.PIsonly.F = new.PIsonly.F[(!is.na(new.PIsonly.F$Gender)),] 
+new.PIsonly.F$Gender = factor(new.PIsonly.F$Gender)#214
+new.PIsonly.M = new.PIsonly[new.PIsonly$Gender=="male",] 
+new.PIsonly.M = new.PIsonly.M[(!is.na(new.PIsonly.M$Gender)),]
+new.PIsonly.M$Gender = factor(new.PIsonly.M$Gender) #23211
+
+m13F<-survreg(Surv(n.years.PI,status)~residuals.degree, dist="lognormal", data=new.PIsonly.F)
+m13M<-survreg(Surv(n.years.PI,status)~residuals.degree, dist="lognormal", data=new.PIsonly.M)
+
+m14F<-survreg(Surv(n.years.PI,status)~residuals.links, dist="lognormal", data=new.PIsonly.F)
+m14M<-survreg(Surv(n.years.PI,status)~residuals.links, dist="lognormal", data=new.PIsonly.M)
+
+m15F<-survreg(Surv(n.years.PI,status)~residuals.cluster, dist="lognormal", data=new.PIsonly.F)
+m15M<-survreg(Surv(n.years.PI,status)~residuals.cluster, dist="lognormal", data=new.PIsonly.M)
+
+m16F<-survreg(Surv(n.years.PI,status)~residuals.average.coauthors, dist="lognormal", data=new.PIsonly.F)
+m16M<-survreg(Surv(n.years.PI,status)~residuals.average.coauthors, dist="lognormal", data=new.PIsonly.M)
+
+
+CIPI_sample_number <- c('Number', 
+                   NA, length(unique(new.PIsonly$author.name)), table(new.PIsonly$Gender)["female"], table(new.PIsonly$Gender)["male"],
+                    NA, length(unique(new.PIsonly$author.name)), table(new.PIsonly$Gender)["female"], table(new.PIsonly$Gender)["male"],
+                    NA, length(unique(new.PIsonly$author.name)), table(new.PIsonly$Gender)["female"], table(new.PIsonly$Gender)["male"],
+                    NA, length(unique(new.PIsonly$author.name)), table(new.PIsonly$Gender)["female"], table(new.PIsonly$Gender)["male"])
+
+R_square_CIPI <- c('R^2',
+                  NA, round(1 - as.numeric(m13$loglik[2] / m13$loglik[1]), 3), round(1 - as.numeric(m13F$loglik[2] / m13F$loglik[1]), 3), round(1 - as.numeric(m13M$loglik[2] / m13M$loglik[1]), 3),
+                   NA, round(1 - as.numeric(m14$loglik[2] / m14$loglik[1]), 3), round(1 - as.numeric(m14F$loglik[2] / m14F$loglik[1]), 3), round(1 - as.numeric(m14M$loglik[2] / m14M$loglik[1]), 3),
+                   NA, round(1 - as.numeric(m15$loglik[2] / m15$loglik[1]), 3), round(1 - as.numeric(m15F$loglik[2] / m15F$loglik[1]), 3), round(1 - as.numeric(m15$loglik[2] / m15M$loglik[1]), 3),
+                   NA, round(1 - as.numeric(m16$loglik[2] / m16$loglik[1]), 3), round(1 - as.numeric(m16F$loglik[2] / m16F$loglik[1]), 3), round(1 - as.numeric(m16M$loglik[2] / m16M$loglik[1]), 3))
+
+estimate_CIPI<-c(NA,
+                NA, exp(coef(m13))[4], exp(coef(m13F))[2], exp(coef(m13M))[2],  
+                NA, exp(coef(m14))[4], exp(coef(m14F))[2], exp(coef(m14M))[2], 
+                NA, exp(coef(m15))[4], exp(coef(m15F))[2], exp(coef(m15M))[2], 
+                NA, exp(coef(m16))[4], exp(coef(m16F))[2], exp(coef(m16M))[2])
+
+lower_CIPI<-c(NA,
+             NA, exp(confint(m13))[4], exp(confint(m13F))[2], exp(confint(m13M))[2],
+             NA, exp(confint(m14))[4], exp(confint(m14F))[2], exp(confint(m14M))[2],
+             NA, exp(confint(m15))[4], exp(confint(m15F))[2], exp(confint(m15M))[2],
+             NA, exp(confint(m16))[4], exp(confint(m16F))[2], exp(confint(m16M))[2])
+
+upper_CIPI<-c(NA,
+             NA, exp(confint(m13))[8], exp(confint(m13F))[4], exp(confint(m13M))[4],
+             NA, exp(confint(m14))[8], exp(confint(m14F))[4], exp(confint(m14M))[4],
+             NA, exp(confint(m15))[8], exp(confint(m15F))[4], exp(confint(m15M))[4],
+             NA, exp(confint(m16))[8], exp(confint(m16F))[4], exp(confint(m16M))[4])
+
+
+forest_CIPI<- data.frame(collaboration_label, CIPI_sample_number, R_square_CIPI, estimate_CIPI, lower_CIPI, upper_CIPI)
+```
+
+```{r}
+library(gridExtra)
+
+library(grid)
+
+f = forestplot(labeltext = as.matrix(forest_TPI[, 1:2]),
+               mean = estimate_TPI,
+               lower = lower_TPI,
+               upper = upper_TPI,
+               is.summary = c(T, T, F, F, F, T, F, F, F, T, F, F, F, T, F, F, F),
+               xticks = c(0.7, 0.8, 0.9, 1, 1.1, 1.2, 1.3, 1.4),
+               lwd.xaxis = 2,
+               zero = 1,
+               lwd.zero =2,
+               lineheight = "auto",
+               colgap = unit(8, "mm"),
+               lwd.ci = 2,
+               boxsize = 0.2,
+               shapes_gp = styles,
+               title = '             Time to become a PI')
+
+clpi2 = forestplot(labeltext = as.matrix(rep("", nrow(forest_CIPI)), ncol = 1),
+                  mean = estimate_CIPI,
+                  lower = lower_CIPI,
+                  upper = upper_CIPI,
+                  is.summary = c(T, T, F, F, F, T, F, F, F, T, F, F, F, T, F, F, F),
+                  xticks = c(0.7, 0.8, 0.9, 1, 1.1, 1.2, 1.3, 1.4),
+                  lwd.xaxis = 2,
+                  zero = 1,
+                  lwd.zero =2,
+                  lineheight = "auto",
+                  colgap = unit(8, "mm"),
+                  lwd.ci = 2,
+                  boxsize = 0.2,
+                  shapes_gp = styles,
+                  title = 'Career length after PI')
+
+# Convert plots to grobs
+f_grob <- grid.grabExpr(print(f))
+clpi_grob <- grid.grabExpr(print(clpi2))
+
+# Arrange the plots side by side
+# Arrange the plots side by side with different widths
+com = grid.arrange(f_grob, clpi_grob, ncol = 2, widths = c(2/3, 1/3))
+# 打开PDF设备
+```
+
+```{r}
+library(ggpubr)
+
+#PI Status
+#Set up necessary data for plotting
+labeltext_likelihood<-c(1:8)
+
+#These values all come from the estimates (and lower and upper CIs) for the various models above
+#and are in the following order:
+
+#Effects of adj. network size, adj. tie strength, and adj. clustering coefficient always F first followed by M (for each C in turn)
+
+Gender_likelihood<-c("F","M","F","M","F","M","F","M")
+estimate_likelihood<-c(m1fsumm$coef[2],
+            m1msumm$coef[2],
+            m2fsumm$coef[2],
+            m2msumm$coef[2],
+            m3fsumm$coef[2],
+            m3msumm$coef[2],
+            m4fsumm$coef[2],
+            m4msumm$coef[2])
+lower_likelihood<-c(m1fsumm$coef[4],
+         m1msumm$coef[4],
+         m2fsumm$coef[4],
+         m2msumm$coef[4],
+         m3fsumm$coef[4],
+         m3msumm$coef[4],
+         m4fsumm$coef[4],
+         m4msumm$coef[4])
+upper_likelihood<-c(m1fsumm$coef[6],
+         m1msumm$coef[6],
+         m2fsumm$coef[6],
+         m2msumm$coef[6],
+         m3fsumm$coef[6],
+         m3msumm$coef[6],
+         m4fsumm$coef[6],
+         m4msumm$coef[6])
+
+df_likelihood<- data.frame(labeltext_likelihood, estimate_likelihood, lower_likelihood, upper_likelihood, Gender_likelihood)
+
+## Reverses the factor level ordering for labels after coord_flip()
+df_likelihood$labeltext_likelihood<-factor(df_likelihood$labeltext_likelihood, levels=rev(df_likelihood$labeltext_likelihood))
+
+df_likelihood$colour_likelihood <- c("dark grey","dark grey","dark grey", "dark grey", "dark grey", "dark grey","dark grey","dark grey")
+#Where there is a significant gender difference within a collaboration behaviour metric then plot in black.
+#Else plot in grey.
+df_likelihood
+plotPIstatus<-
+  ggplot(data=df_likelihood, aes(x=labeltext_likelihood, y=estimate_likelihood, ymin=lower_likelihood, ymax=upper_likelihood, shape=Gender_likelihood, col=Gender_likelihood))+
+  annotate("rect", xmin = 0, xmax = 8.7, ymin = 0, ymax = 0.5, alpha = .2, fill = "grey") +
+  annotate("rect", xmin = 0, xmax = 8.7, ymin = -0.5, ymax = 0, alpha = .2, fill = "white") +
+  expand_limits(x = 0)+
+  #fills the area of the plot where there is a beneficial effect of the collaboration behaviour on the career progression measure.
+  geom_point(aes(size=2,col = colour_likelihood, fill = colour_likelihood),show.legend=FALSE) +
+  geom_pointrange(data = df_likelihood,size=0.7, col = df_likelihood$colour_likelihood, fill = df_likelihood$colour_likelihood) +
+  geom_hline(yintercept=0, lty=2) +  # Add a dotted line at x=1 after flip
+  geom_errorbar(aes(ymin=lower_likelihood, ymax=upper_likelihood, width=0.6,cex=1,col=colour_likelihood),show.legend=FALSE) +
+  scale_x_discrete(breaks=c(1,3,5, 7),
+                   labels=c("Network Size","Tie Strength","Clustering coefficient","Coauthors per publication" )) +
+  coord_flip() +  # Flip coordinates (puts labels on y axis)
+  xlab("Label") + ylab("Odds ratio") +
+  scale_fill_manual(values=c("dark grey","dark grey","dark grey", "dark grey","dark grey","dark grey","dark grey", "dark grey"))+
+  scale_colour_manual(values=c("dark grey","dark grey","dark grey","dark grey","dark grey","dark grey", "dark grey","dark grey")) + 
+  scale_shape_manual(values=c(17,16))+
+  annotate("text",x=1, y=0.5, label="Likelihood of being a PI",size=5,fontface="bold",hjust=1) +
+  theme(axis.title.y = element_blank(), # Remove y axis title
+        axis.text.y = element_text(size=12, colour="black"), # Change size of y axis labels
+        axis.text.x = element_text(size=12,colour="black"), # Change size of x axis numbers
+        axis.title.x = element_text(size=14,vjust=0.5,colour="black",face="bold"), # Change size and font of x axis title and move it down a bit
+        panel.grid.major = element_blank(), # Formatting to create blank plot with box around it
+        axis.line = element_line(colour="black"),
+        panel.background = element_rect(colour = "black", size=1, fill=NA),
+        legend.position = c(0.85,0.5), # Position legend inside plot
+        legend.key = element_rect(color = NA,fill=NA), # Make background of symbols in legend grey
+        legend.text=element_text(size=14),
+        legend.key.size = unit(0.5,"cm"),
+        legend.key.width = unit(1,"cm"),
+        legend.background=element_rect(colour=NA,fill=NA),
+        legend.title =element_blank())
+
+#Now set up plots for Time to PI and Career Length (TPICL)
+#Uses similar approach to above.
+plotPIstatus
+
+labeltext_TPICL<-c(1:16)
+
+Gender_TPICL<-c("F","M","F","M","F","M","F","M","F","M","F","M","F","M","F","M")
+
+#exp(model$res.t[3]) #gives exp(est) i.e. decceleration factor
+#exp(model$res.t[6]) #gives lower CI
+#exp(model$res.t[9]) #gives upper CI
+
+
+estimate_TPICL<-c(exp(coef(m5F))[2], exp(coef(m5M))[2], 
+                  exp(coef(m6F))[2], exp(coef(m6M))[2],
+                  exp(coef(m7F))[2], exp(coef(m7M))[2],
+                  exp(coef(m8F))[2], exp(coef(m8M))[2],
+                  exp(coef(m9F))[2], exp(coef(m9M))[2],
+                  exp(coef(m10F))[2], exp(coef(m10M))[2], 
+                  exp(coef(m11F))[2], exp(coef(m11M))[2], 
+                  exp(coef(m12F))[2], exp(coef(m12M))[2]
+                  )
+
+lower_TPICL<-c(exp(confint(m5F))[2], exp(confint(m5M))[2],
+               exp(confint(m6F))[2], exp(confint(m6M))[2],
+               exp(confint(m7F))[2], exp(confint(m7M))[2],
+               exp(confint(m8F))[2], exp(confint(m8M))[2],
+               exp(confint(m9F))[2], exp(confint(m9M))[2],
+               exp(confint(m10F))[2], exp(confint(m10M))[2],
+               exp(confint(m11F))[2], exp(confint(m11M))[2],
+               exp(confint(m12F))[2], exp(confint(m12M))[2])
+
+upper_TPICL<-c(exp(confint(m5F))[4], exp(confint(m5M))[4],
+               exp(confint(m6F))[4], exp(confint(m6M))[4],
+               exp(confint(m7F))[4], exp(confint(m7M))[4],
+               exp(confint(m8F))[4], exp(confint(m8M))[4],
+               exp(confint(m9F))[4], exp(confint(m9M))[4],
+               exp(confint(m10F))[4], exp(confint(m10M))[4],
+               exp(confint(m11F))[4], exp(confint(m11M))[4],
+               exp(confint(m12F))[4], exp(confint(m12M))[4])
+
+df_TPICL <- data.frame(labeltext_TPICL, estimate_TPICL, lower_TPICL, upper_TPICL, Gender_TPICL)
+
+## Reverses the factor level ordering for labels after coord_flip()
+df_TPICL$labeltext_TPICL <- factor(df_TPICL$labeltext_TPICL, levels=rev(df_TPICL$labeltext_TPICL))
+
+df_TPICL$colour <- c("dark grey","dark grey","dark grey","dark grey", "dark grey","dark grey","dark grey","dark grey","dark grey","dark grey", "black","black","dark grey","dark grey","dark grey","dark grey")
+
+
+plotTPICL1<-
+  ggplot(data=df_TPICL, aes(x=labeltext_TPICL, y=estimate_TPICL, ymin=lower_TPICL, ymax=upper_TPICL,
+                            col=Gender_TPICL, shape=Gender_TPICL))+
+  annotate("rect", xmin = 0, xmax = 8.5, ymin = 1, ymax = 1.5, alpha = .2, fill = "grey") +
+  annotate("rect", xmin = 8.5, xmax = 16.7, ymin = 0.6, ymax = 1, alpha = .2, fill = "grey") +
+  geom_point(aes(size=2,col = colour, fill = colour),show.legend=FALSE)+
+  geom_pointrange(size=0.7, col = df_TPICL$colour, fill = df_TPICL$colour,show.legend=FALSE) + 
+  geom_hline(yintercept=1, lty=2) +  # Add a dotted line at x=1 after flip
+  geom_vline(xintercept=8.5, lty=1) + # Adds a solid line at y=6.5 after flip to differentiate between top panel = career longevity and bottom panel = time to PI
+  geom_errorbar(aes(ymin=lower_TPICL, ymax=upper_TPICL,width=0.6,cex=1,col=colour, fill = colour),show.legend=FALSE) +
+  scale_x_discrete(breaks=c(1,3,5,7,9,11,13,15),
+                   labels=c("Network Size","Tie Strength","Clustering coefficient","Coauthors per publication" ,
+                            "Network Size","Tie Strength","Clustering coefficient","Coauthors per publication" )) +
+  coord_flip() +  # Flip coordinates (puts labels on y axis)
+  xlab("Label") + ylab("Deceleration factor") +
+  scale_fill_manual(values=c("dark grey","dark grey","black","black","dark grey","dark grey","black","black","dark grey","dark grey","dark grey","dark grey"))+
+  scale_colour_manual(values=c("black","dark grey","dark grey","dark grey","black","black")) + 
+  scale_shape_manual(values=c(17,16))+
+  annotate("text",x=9.2, y=1.5, label="Time to become a PI",size=5,fontface="bold",hjust=1) +
+  annotate("text",x=1, y=1.5, label="Career length", size=5,fontface="bold",hjust=1) +
+  theme(axis.title.y = element_blank(), # Remove y axis title
+        axis.text.y = element_text(size=12, colour="black"), # Change size of y axis labels
+        axis.text.x = element_text(size=12,colour="black"), # Change size of x axis numbers
+        axis.title.x = element_text(size=14,vjust=0.5,colour="black",face="bold"), # Change size and font of x axis title and move it down a bit
+        panel.grid.major = element_blank(), # Formatting to create blank plot with box around it
+        axis.line = element_line(colour="black"),
+        panel.background = element_rect(colour = "black", size=1, fill=NA),
+        legend.title =element_blank())+
+  guides(colour=FALSE) 
+
+plotTPICL1
+#Add label to plot C
+plotTPICL2<-plotTPICL1+
+  labs(tag="C")+
+  theme(plot.tag.position = c(0.19,0.5),plot.tag = element_text(size=14,face="bold"))
+
+
+#Now layout plots and plot them - labels for plots A and B added here
+ggarrange(plotPIstatus,plotTPICL1,heights=c(1,1.7),ncol=1,nrow=2)
+plotTPICL2
+
+```
+
