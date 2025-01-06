@@ -431,7 +431,7 @@ estimate_CI<-c(NA,
 lower_CI<-c(NA,
              NA, exp(confint(m9))[4], exp(confint(m9F))[2], exp(confint(m9M))[2],
              NA, exp(confint(m10))[4], exp(confint(m10F))[2], exp(confint(m10M))[2],
-             NA, exp(confint(m11))[4], exp(confint(m10F))[2], exp(confint(m10M))[2],
+             NA, exp(confint(m11))[4], exp(confint(m11F))[2], exp(confint(m11M))[2],
              NA, exp(confint(m12))[4], exp(confint(m12F))[2], exp(confint(m12M))[2])
 
 upper_CI<-c(NA,
