@@ -560,7 +560,7 @@ lower_TPI<-c(NA,
 
 upper_TPI<-c(NA,
              NA, exp(confint(m5))[8], exp(confint(m5F))[4], exp(confint(m5M))[4],
-             NA, exp(confint(m6))[8], exp(confint(m5F))[4], exp(confint(m5M))[4],
+             NA, exp(confint(m6))[8], exp(confint(m6F))[4], exp(confint(m6M))[4],
              NA, exp(confint(m7))[8], exp(confint(m7F))[4], exp(confint(m7M))[4],
              NA, exp(confint(m8))[8], exp(confint(m8F))[4], exp(confint(m8M))[4])
 
